@@ -92,6 +92,26 @@ EOF
     assert_equal content, BashStrict.lint(content)
   end
 
+  it "doesn't " do
+    content = <<EOF
+#!/usr/bin/env bash
+
+set -CEeuo pipefail
+IFS=$'\n\t'
+shopt -s extdebug
+
+# Setup ruby dependencies
+bundle install
+
+# Setup Node.js
+yarn
+EOF
+
+    int = BashStrict::Parser.call(content)
+    actual = BashStrict::Parser.normalize(int)
+    assert_equal(content, actual)
+  end
+
   #it "alters bash files" do
   #  content = <<EOF
 ##!/usr/bin/env bash
@@ -171,8 +191,8 @@ EOF
     end
   end
 
-  describe "parses simple file" do
-    it "something2" do
+  describe "parses complex file" do
+    it "correctly" do
       e = {:header=> {
         :shebang=>"#!/usr/bin/env bash",
         :comments=>["#", "# Usage: ....", "# Commandline arguments", "# Credit:", "#"],
@@ -183,7 +203,76 @@ EOF
           :shopt=>[:extdebug]}
       },
       :body=>[".", ".", "", "", "echo \"hello\""]}
-      assert_equal(e, BashStrict::Parser.call(@bash_with_declarations_and_comment.join("\n")))
+      actual = BashStrict::Parser.call(@bash_with_declarations_and_comment.join("\n"))
+      assert_equal(e, actual)
+    end
+
+    it "recombines file without changes when starts perfect ;)" do
+      expected = <<EOF
+#!/usr/bin/env bash
+
+set -CEeuo pipefail
+IFS=$'\\n\\t'
+shopt -s extdebug
+
+echo "hello"
+EOF
+
+      int = BashStrict::Parser.call(expected)
+      actual = BashStrict::Parser.normalize(int)
+      assert_equal(expected, actual)
+    end
+
+    it "recombines complex that start well ;)" do
+      expected = <<EOF
+#!/usr/bin/env bash
+# So many comments explaining usage
+
+set -CEeuo pipefail
+IFS=$'\\n\\t'
+shopt -s extdebug
+
+echo "hello"
+EOF
+
+      int = BashStrict::Parser.call(expected)
+      actual = BashStrict::Parser.normalize(int)
+      assert_equal(expected, actual)
+    end
+
+    it "recombines complex file with more perfection ;)" do
+      original = <<EOF
+#!/usr/bin/env bash
+set -CEeuo pipefail
+shopt -s extdebug
+IFS=$'\n\t'
+# So many comments explaining usage
+# AAAAAAAAAA
+
+echo "hello"
+shopt -s extdebug
+  echo "indentations"
+printf "all the things"
+EOF
+
+      desired = <<EOF
+#!/usr/bin/env bash
+# So many comments explaining usage
+# AAAAAAAAAA
+
+set -CEeuo pipefail
+IFS=$'\\n\\t'
+shopt -s extdebug
+
+echo "hello"
+shopt -s extdebug
+  echo "indentations"
+printf "all the things"
+EOF
+
+      int = BashStrict::Parser.call(original)
+      actual = BashStrict::Parser.normalize(int)
+      assert_equal(desired, actual)
     end
   end
 end

@@ -3,8 +3,12 @@ require 'strscan'
 
 module BashStrict
   LANGUAGES_SUPPORTED = [:bash]
+  SHEBANG = "#!/usr/bin/env bash"
+  STRICT_SET = "set -CEeuo pipefail"
+  EXT_DEBUG = "shopt -s extdebug"
   QUOTES = /['"]/
-  IFS = %Q(IFS=$'\n\t')
+  EXT_DEBUG_REGEX = /^#{EXT_DEBUG}$/
+  IFS = %Q(IFS=$'\\n\\t')
   IFS_REGEX = /^IFS=
                \$? # match in case the $'\n\t' syntax used
                #{QUOTES}
@@ -12,15 +16,11 @@ module BashStrict
                #{QUOTES}
               $/xm
 
-  EXT_DEBUG = "shopt -s extdebug"
-  EXT_DEBUG_REGEX = /^#{EXT_DEBUG}$/
-
-  STRICT_SET = "set -CEeuo pipefail"
-
   PREFERRED_DECLARATION = {
-    :strict => [],
+    :strict => STRICT_SET,
+    :shebang => SHEBANG,
     :ifs => IFS,
-    :extdebug => EXT_DEBUG,
+    :shopt => EXT_DEBUG,
   }
 
   EMPTY_DECLARATION = {
@@ -31,8 +31,29 @@ module BashStrict
 
   class Parser
     class << self
+      def normalize(data)
+        shebang, strict, ifs, shopt = PREFERRED_DECLARATION.values_at(:shebang, :strict, :ifs, :shopt)
+        comments = data[:header][:comments]
+        body = data[:body]
+
+        [shebang, comments, "", strict, ifs, shopt, "", body].flatten.join("\n") + "\n"
+      end
+
       def parse_shopt(line)
         line.split(" ", 3).last.to_sym
+      end
+
+      SPECIAL_LINES = [
+        /^#!/,
+        /^#/,
+        /^IFS/,
+        EXT_DEBUG_REGEX,
+        /^set -/,
+        //,
+      ]
+
+      def special_line?(line)
+        SPECIAL_LINES.find { |reg| !!line[reg] }
       end
 
       def call(content)
@@ -77,7 +98,13 @@ module BashStrict
                 header[:shebang] = line
               end
             when /^#/
-              header[:comments] << line
+              # IF next line is a special one, carry on, if not, we're into body
+              if !special_line?(s.check_until(/\n/))
+                file[:body] << line
+                in_body = true
+              else
+                header[:comments] << line
+              end
             when /^IFS/
               header[:declarations][:ifs] = line
             when EXT_DEBUG_REGEX
